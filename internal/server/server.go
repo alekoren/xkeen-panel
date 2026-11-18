@@ -23,50 +23,30 @@ import (
 )
 
 type Server struct {
-	config       *models.Config
-	userManager  *auth.UserManager
+	config *models.Config
+	userManager *auth.UserManager
 	subscription *xkeen.SubscriptionManager
-	watchdog     *monitor.Watchdog
-	detector     *xkeen.Detector
-	pool         *xkeen.PoolStore
-	sites        *xkeen.SiteManager
-	geoip        *geoip.Matcher
-	eventBus     *sse.EventBus
-	updater      *updater.Updater
-	coreUpdater  *coreupdate.Updater
-	settings     *api.PanelSettingsHandler
-	frontendFS   fs.FS
+	watchdog *monitor.Watchdog
+	detector *xkeen.Detector
+	pool *xkeen.PoolStore
+	sites *xkeen.SiteManager
+	geoip *geoip.Matcher
+	eventBus *sse.EventBus
+	updater *updater.Updater
+	coreUpdater *coreupdate.Updater
+	settings *api.PanelSettingsHandler
+	frontendFS fs.FS
 }
 
 func New(cfg *models.Config, um *auth.UserManager, sub *xkeen.SubscriptionManager, wd *monitor.Watchdog, det *xkeen.Detector, pool *xkeen.PoolStore, sites *xkeen.SiteManager, matcher *geoip.Matcher, bus *sse.EventBus, upd *updater.Updater, core *coreupdate.Updater, settings *api.PanelSettingsHandler, frontendFS fs.FS) *Server {
-	return &Server{
-		config:       cfg,
-		userManager:  um,
-		subscription: sub,
-		watchdog:     wd,
-		detector:     det,
-		pool:         pool,
-		sites:        sites,
-		geoip:        matcher,
-		eventBus:     bus,
-		updater:      upd,
-		coreUpdater:  core,
-		settings:     settings,
-		frontendFS:   frontendFS,
-	}
+	return &Server{config: cfg, userManager: um, subscription: sub, watchdog: wd, detector: det, pool: pool, sites: sites, geoip: matcher, eventBus: bus, updater: upd, coreUpdater: core, settings: settings, frontendFS: frontendFS}
 }
 
 func (s *Server) Handler() http.Handler {
 	r := chi.NewRouter()
-
-	// Middleware
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
-
-	// Login rate limiter: 5 attempts per minute
 	rateLimiter := api.NewRateLimiter(5, time.Minute)
-
-	// Handlers
 	authHandler := api.NewAuthHandler(s.userManager, rateLimiter, s.config)
 	webAuthnHandler := api.NewWebAuthnHandler(s.userManager, rateLimiter, s.config)
 	updateHandler := api.NewUpdateHandler(s.updater)
@@ -75,10 +55,9 @@ func (s *Server) Handler() http.Handler {
 	setupHandler := api.NewSetupHandler(s.detector, s.subscription, s.watchdog, devicesHandler)
 	sitesHandler := api.NewSitesHandler(s.sites)
 	handlers := api.NewHandlers(s.config, s.subscription, s.watchdog, s.detector, s.pool, s.geoip)
+	core := &coreSwitch{detector: s.detector}
 
-	// API routes
 	r.Route("/api", func(r chi.Router) {
-		// Authentication, no JWT required
 		r.Route("/auth", func(r chi.Router) {
 			r.Get("/status", authHandler.HandleAuthStatus)
 			r.Post("/setup", authHandler.HandleSetup)
@@ -87,60 +66,45 @@ func (s *Server) Handler() http.Handler {
 			r.With(api.RateLimitMiddleware(rateLimiter, s.config.TrustProxyHeaders)).Post("/login/passkey/begin", webAuthnHandler.HandleLoginBegin)
 			r.With(api.RateLimitMiddleware(rateLimiter, s.config.TrustProxyHeaders)).Post("/login/passkey/finish", webAuthnHandler.HandleLoginFinish)
 		})
-
-		// SSE routes: JWT required, no timeout
 		r.Group(func(r chi.Router) {
 			r.Use(api.AuthMiddleware(s.userManager))
-
 			r.Get("/events", sse.HandleEvents(s.eventBus, s.watchdog))
 			r.Get("/servers/check", sse.HandleStreamLatency(s.subscription, s.config.ProbeConcurrency, time.Duration(s.config.ProbeTimeoutMs)*time.Millisecond))
 		})
-
-		// Protected REST routes: JWT and a timeout
 		r.Group(func(r chi.Router) {
 			r.Use(api.AuthMiddleware(s.userManager))
 			r.Use(middleware.Timeout(30 * time.Second))
-
 			r.Get("/status", handlers.HandleStatus)
-
 			r.Get("/subscription", handlers.HandleGetSubscription)
 			r.Post("/subscription", handlers.HandleUpdateSubscription)
 			r.Post("/subscription/refresh", handlers.HandleRefreshSubscription)
-
 			r.Get("/servers", handlers.HandleGetServers)
 			r.Post("/servers/select", handlers.HandleSelectServer)
 			r.Post("/servers/check", handlers.HandleCheckServers)
 			r.Post("/servers/country", handlers.HandleSetCountry)
-
-			// Passkey management
 			r.Post("/account/passkey/register/begin", webAuthnHandler.HandleRegisterBegin)
 			r.Post("/account/passkey/register/finish", webAuthnHandler.HandleRegisterFinish)
 			r.Get("/account/passkey", webAuthnHandler.HandlePasskeyList)
 			r.Delete("/account/passkey", webAuthnHandler.HandlePasskeyDelete)
-
+			r.Get("/xkeen/core", core.get)
+			r.Post("/xkeen/core", core.post)
 			r.Post("/xkeen/restart", handlers.HandleRestart)
 			r.Post("/xkeen/start", handlers.HandleStart)
 			r.Post("/xkeen/stop", handlers.HandleStop)
 			r.Post("/xkeen/selftest", handlers.HandleSelfTest)
-
 			r.Get("/xkeen/settings", handlers.HandleGetSettings)
 			r.Put("/xkeen/settings", handlers.HandleUpdateSettings)
 			r.Get("/xkeen/lists/{name}", handlers.HandleGetList)
 			r.Put("/xkeen/lists/{name}", handlers.HandleUpdateList)
-
 			r.Post("/mihomo/sync", handlers.HandleMihomoSync)
-
 			r.Get("/setup/state", setupHandler.HandleState)
 			r.Post("/setup/policy", setupHandler.HandlePolicy)
 			r.Post("/setup/finish", setupHandler.HandleFinish)
-
 			r.Get("/panel/settings", s.settings.HandleGet)
 			r.Put("/panel/settings", s.settings.HandlePut)
-
 			r.Get("/devices", devicesHandler.HandleList)
 			r.Post("/devices/vpn", devicesHandler.HandleSetVPN)
 			r.Post("/devices/new", devicesHandler.HandleNewDevicesVPN)
-
 			r.Get("/pool", handlers.HandlePoolStatus)
 			r.Post("/pool/enable", handlers.HandlePoolEnable)
 			r.Post("/pool/disable", handlers.HandlePoolDisable)
@@ -148,7 +112,6 @@ func (s *Server) Handler() http.Handler {
 			r.Post("/pool/pin", handlers.HandlePoolPin)
 			r.Post("/pool/auto", handlers.HandlePoolAuto)
 			r.Post("/pool/members", handlers.HandlePoolMember)
-
 			r.Get("/sites", sitesHandler.HandleList)
 			r.Post("/sites", sitesHandler.HandleCreate)
 			r.Post("/sites/{id}/check", sitesHandler.HandleCheck)
@@ -157,7 +120,6 @@ func (s *Server) Handler() http.Handler {
 			r.Put("/sites/{id}/source", sitesHandler.HandleSource)
 			r.Get("/sites/sources", sitesHandler.HandleSources)
 			r.Delete("/sites/{id}/lock", sitesHandler.HandleUnlock)
-
 			r.Get("/update", updateHandler.HandleStatus)
 			r.Post("/update/check", updateHandler.HandleCheck)
 			r.Post("/update/apply", updateHandler.HandleApply)
@@ -167,14 +129,9 @@ func (s *Server) Handler() http.Handler {
 			r.Post("/core/update/check", coreUpdateHandler.HandleCheck)
 			r.Post("/core/update/apply", coreUpdateHandler.HandleApply)
 			r.Post("/core/update/rollback", coreUpdateHandler.HandleRollback)
-
 			r.Get("/logs", handlers.HandleLogs)
-
-			// Watchdog toggle
 			r.Post("/watchdog/toggle", func(w http.ResponseWriter, r *http.Request) {
-				var req struct {
-					Active bool `json:"active"`
-				}
+				var req struct { Active bool `json:"active"` }
 				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusBadRequest)
@@ -187,31 +144,21 @@ func (s *Server) Handler() http.Handler {
 			})
 		})
 	})
-
-	// SPA fallback: serve the frontend
 	if s.frontendFS != nil {
 		fileServer := http.FileServer(http.FS(s.frontendFS))
 		r.Get("/*", func(w http.ResponseWriter, r *http.Request) {
-			// Try to serve a static file
 			path := r.URL.Path
-			if path == "/" {
-				path = "/index.html"
-			}
-
-			// Check whether the file exists
-			f, err := s.frontendFS.Open(path[1:]) // drop the leading /
+			if path == "/" { path = "/index.html" }
+			f, err := s.frontendFS.Open(path[1:])
 			if err == nil {
 				f.Close()
 				fileServer.ServeHTTP(w, r)
 				return
 			}
-
-			// SPA fallback: serve index.html
 			r.URL.Path = "/"
 			fileServer.ServeHTTP(w, r)
 		})
 	}
-
 	return r
 }
 

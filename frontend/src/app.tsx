@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { SetupPage } from '@/pages/setupPage'
 import { LoginPage } from '@/pages/loginPage'
 import { AppShell } from '@/components/appShell'
+import { CoreSwitch } from '@/components/coreSwitch'
 import { HomePage } from '@/pages/homePage'
 import { ServersPage } from '@/pages/serversPage'
 import { DevicesPage } from '@/pages/devicesPage'
@@ -45,37 +46,15 @@ export function App() {
                 ) : (
                     <>
                         <Route path='/login' element={<LoginPage />} />
-                        <Route
-                            path='/welcome'
-                            element={
-                                <ProtectedRoute>
-                                    <WelcomePage />
-                                </ProtectedRoute>
-                            }
-                        />
-                        <Route
-                            element={
-                                <ProtectedRoute>
-                                    <AppShell />
-                                </ProtectedRoute>
-                            }
-                        >
-                            <Route index element={<HomePage />} />
+                        <Route path='/welcome' element={<ProtectedRoute><WelcomePage /></ProtectedRoute>} />
+                        <Route element={<ProtectedRoute><AppShell /></ProtectedRoute>}>
+                            <Route index element={<><CoreSwitch /><HomePage /></>} />
                             <Route path='servers' element={<ServersPage />} />
                             <Route path='devices' element={<DevicesPage />} />
                             <Route path='settings' element={<SettingsPage />} />
-                            <Route
-                                path='settings/update'
-                                element={<UpdatePage />}
-                            />
-                            <Route
-                                path='settings/xkeen'
-                                element={<XkeenSettingsPage />}
-                            />
-                            <Route
-                                path='settings/diagnostics'
-                                element={<DiagnosticsPage />}
-                            />
+                            <Route path='settings/update' element={<UpdatePage />} />
+                            <Route path='settings/xkeen' element={<XkeenSettingsPage />} />
+                            <Route path='settings/diagnostics' element={<DiagnosticsPage />} />
                         </Route>
                         <Route path='*' element={<Navigate to='/' />} />
                     </>
