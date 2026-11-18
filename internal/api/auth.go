@@ -1,157 +1,45 @@
 package api
 
 import (
-	"encoding/json"
-	"net/http"
-	"strings"
-	"xkeen-panel/internal/auth"
-	"xkeen-panel/internal/models"
+ "encoding/json"
+ "net/http"
+ "strings"
+ "xkeen-panel/internal/auth"
+ "xkeen-panel/internal/models"
 )
 
-type AuthHandler struct {
-	userManager *auth.UserManager
-	rateLimiter *RateLimiter
-	cfg         *models.Config
+type AuthHandler struct { userManager *auth.UserManager; rateLimiter *RateLimiter; cfg *models.Config }
+func NewAuthHandler(um *auth.UserManager,rl *RateLimiter,cfg *models.Config) *AuthHandler { return &AuthHandler{userManager:um,rateLimiter:rl,cfg:cfg} }
+func (h *AuthHandler) HandleAuthStatus(w http.ResponseWriter,r *http.Request) {
+ writeJSON(w,200,map[string]interface{}{"setup_required":h.userManager.SetupRequired(),"passkey_enabled":false,"totp_required":false})
 }
-
-func NewAuthHandler(um *auth.UserManager, rl *RateLimiter, cfg *models.Config) *AuthHandler {
-	return &AuthHandler{userManager: um, rateLimiter: rl, cfg: cfg}
+func (h *AuthHandler) HandleSetup(w http.ResponseWriter,r *http.Request) {
+ if !h.userManager.SetupRequired() { writeJSON(w,400,map[string]string{"error":"пользователь уже настроен"}); return }
+ var req models.SetupRequest
+ if json.NewDecoder(http.MaxBytesReader(w,r.Body,4096)).Decode(&req)!=nil { writeJSON(w,400,map[string]string{"error":"неверный формат запроса"}); return }
+ req.Username=strings.TrimSpace(req.Username)
+ if req.Username=="" || len(req.Username)>100 || len(req.Password)<8 || len(req.Password)>72 { writeJSON(w,400,map[string]string{"error":"нужны логин до 100 байт и пароль от 8 до 72 байт"}); return }
+ if h.userManager.CreatePasswordUser(req.Username,req.Password)!=nil { writeJSON(w,400,map[string]string{"error":"не удалось создать пользователя; проверьте состояние настройки"}); return }
+ h.passwordToken(w)
 }
-
-// HandleAuthStatus — GET /api/auth/status
-func (h *AuthHandler) HandleAuthStatus(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"setup_required":  h.userManager.SetupRequired(),
-		"passkey_enabled": h.userManager.HasWebAuthnCredentials(),
-	})
+func (h *AuthHandler) HandleSetupConfirm(w http.ResponseWriter,r *http.Request) {
+ writeJSON(w,http.StatusGone,map[string]string{"error":"подтверждение TOTP больше не используется; обновите страницу"})
 }
-
-// HandleSetup — POST /api/auth/setup
-func (h *AuthHandler) HandleSetup(w http.ResponseWriter, r *http.Request) {
-	if !h.userManager.SetupRequired() {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error": "пользователь уже настроен",
-		})
-		return
-	}
-
-	var req models.SetupRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "неверный формат запроса"})
-		return
-	}
-
-	if req.Username == "" || req.Password == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "логин и пароль обязательны"})
-		return
-	}
-
-	if len(req.Password) < 8 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "пароль должен быть не менее 8 символов"})
-		return
-	}
-
-	// Generate the TOTP secret
-	secret, qrBase64, err := auth.GenerateTOTP(req.Username)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "ошибка генерации TOTP"})
-		return
-	}
-
-	// Create the pending account
-	if err := h.userManager.CreatePendingUser(req.Username, req.Password, secret); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "ошибка создания пользователя"})
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]string{
-		"totp_secret": secret,
-		"totp_qr":     qrBase64,
-	})
+func (h *AuthHandler) passwordToken(w http.ResponseWriter) {
+ user:=h.userManager.GetUser(); if user==nil { writeJSON(w,401,map[string]string{"error":"пользователь не настроен"}); return }
+ token,err:=auth.GenerateToken(user.Username,user.JWTSecret)
+ if err!=nil { writeJSON(w,500,map[string]string{"error":"ошибка генерации токена"}); return }
+ writeJSON(w,200,map[string]string{"token":token})
 }
-
-// HandleSetupConfirm — POST /api/auth/setup/confirm
-func (h *AuthHandler) HandleSetupConfirm(w http.ResponseWriter, r *http.Request) {
-	if !h.userManager.HasPendingSetup() {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "setup не начат"})
-		return
-	}
-
-	var req models.SetupConfirmRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "неверный формат запроса"})
-		return
-	}
-
-	secret := h.userManager.GetPendingTOTPSecret()
-	if !auth.ValidateTOTP(req.Code, secret) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "неверный TOTP-код"})
-		return
-	}
-
-	if err := h.userManager.ConfirmSetup(); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "ошибка сохранения пользователя"})
-		return
-	}
-
-	user := h.userManager.GetUser()
-	token, err := auth.GenerateToken(user.Username, user.JWTSecret)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "ошибка генерации токена"})
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]string{"token": token})
+func (h *AuthHandler) HandleLogin(w http.ResponseWriter,r *http.Request) {
+ var req models.LoginRequest
+ if json.NewDecoder(http.MaxBytesReader(w,r.Body,4096)).Decode(&req)!=nil { writeJSON(w,400,map[string]string{"error":"неверный формат запроса"}); return }
+ if !h.userManager.CheckPassword(req.Username,req.Password) { writeJSON(w,401,map[string]string{"error":"неверный логин или пароль"}); return }
+ h.rateLimiter.Reset(strings.TrimSpace(clientIP(r,h.cfg.TrustProxyHeaders)))
+ h.passwordToken(w)
 }
-
-// HandleLogin — POST /api/auth/login
-func (h *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
-	ip := clientIP(r, h.cfg.TrustProxyHeaders)
-
-	var req models.LoginRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "неверный формат запроса"})
-		return
-	}
-
-	if !h.userManager.CheckPassword(req.Username, req.Password) {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "неверный логин или пароль"})
-		return
-	}
-
-	user := h.userManager.GetUser()
-	if !auth.ValidateTOTP(req.TOTPCode, user.TOTPSecret) {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "неверный TOTP-код"})
-		return
-	}
-
-	token, err := auth.GenerateToken(user.Username, user.JWTSecret)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "ошибка генерации токена"})
-		return
-	}
-
-	// Reset the rate limiter after a successful login
-	h.rateLimiter.Reset(strings.TrimSpace(ip))
-
-	writeJSON(w, http.StatusOK, map[string]string{"token": token})
+func clientIP(r *http.Request,trustProxy bool) string {
+ if trustProxy { if forwarded:=r.Header.Get("X-Forwarded-For"); forwarded!="" { parts:=strings.Split(forwarded,","); return strings.TrimSpace(parts[len(parts)-1]) } }
+ return r.RemoteAddr
 }
-
-// clientIP identifies a client for rate limiting. X-Forwarded-For is honoured
-// ONLY with trust_proxy_headers — it is trivially spoofed on the direct socket —
-// and the rightmost hop is taken, the one the trusted proxy appended.
-func clientIP(r *http.Request, trustProxy bool) string {
-	if trustProxy {
-		if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
-			parts := strings.Split(forwarded, ",")
-			return strings.TrimSpace(parts[len(parts)-1])
-		}
-	}
-	return r.RemoteAddr
-}
-
-func writeJSON(w http.ResponseWriter, status int, data interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(data)
-}
+func writeJSON(w http.ResponseWriter,status int,data interface{}) { w.Header().Set("Content-Type","application/json"); w.WriteHeader(status); json.NewEncoder(w).Encode(data) }
