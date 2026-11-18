@@ -1,8 +1,8 @@
 # Mihomo preview build report
 
-Source commit: a6008bb6c0bc3f1ab9a9d2c811c2e252aaeb63ad
+Source commit: 88635324e44416a09eecb592b4a448fff3330bb4
 
-Run: https://github.com/alekoren/xkeen-panel/actions/runs/44325147092
+Run: https://github.com/alekoren/xkeen-panel/actions/runs/44325799898
 
 ## go: success
 
@@ -13,7 +13,7 @@ Run: https://github.com/alekoren/xkeen-panel/actions/runs/44325147092
 ~~~~text
 npm warn deprecated node-domexception@1.0.0: Use your platform's native DOMException instead
 
-added 409 packages, and audited 410 packages in 11s
+added 409 packages, and audited 410 packages in 8s
 
 124 packages are looking for funding
   run `npm fund` for details
@@ -45,7 +45,7 @@ computing gzip size...
 [2mdist/[22m[32mindex.html                 [39m[1m[2m  0.91 kB[22m[1m[22m[2m │ gzip:   0.41 kB[22m
 [2mdist/[22m[2massets/[22m[35mindex-DjLrqkNL.css  [39m[1m[2m 48.42 kB[22m[1m[22m[2m │ gzip:   9.06 kB[22m
 [2mdist/[22m[2massets/[22m[36mindex-DMLFBpDs.js   [39m[1m[2m420.23 kB[22m[1m[22m[2m │ gzip: 130.05 kB[22m
-[32m✓ built in 3.76s[39m
+[32m✓ built in 2.74s[39m
 
 ~~~~
 
@@ -53,20 +53,20 @@ computing gzip size...
 
 ~~~~text
 ?   	xkeen-panel	[no test files]
-ok  	xkeen-panel/internal/api	0.500s
-ok  	xkeen-panel/internal/auth	0.338s
-ok  	xkeen-panel/internal/coreupdate	(cached)
+ok  	xkeen-panel/internal/api	0.409s
+ok  	xkeen-panel/internal/auth	0.241s
+ok  	xkeen-panel/internal/coreupdate	1.107s
 ok  	xkeen-panel/internal/geoip	(cached)
 ok  	xkeen-panel/internal/keenetic	(cached)
 ok  	xkeen-panel/internal/localtz	(cached)
-ok  	xkeen-panel/internal/mihomo	(cached)
+ok  	xkeen-panel/internal/mihomo	0.011s
 ?   	xkeen-panel/internal/models	[no test files]
-ok  	xkeen-panel/internal/monitor	(cached)
-ok  	xkeen-panel/internal/server	0.004s
-ok  	xkeen-panel/internal/sse	(cached)
+ok  	xkeen-panel/internal/monitor	0.076s
+ok  	xkeen-panel/internal/server	0.003s
+ok  	xkeen-panel/internal/sse	0.003s
 ok  	xkeen-panel/internal/updater	(cached)
 ?   	xkeen-panel/internal/version	[no test files]
-ok  	xkeen-panel/internal/xkeen	0.719s
+ok  	xkeen-panel/internal/xkeen	0.610s
 
 ~~~~
 
